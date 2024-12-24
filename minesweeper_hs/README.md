@@ -5,7 +5,7 @@
 1. **Start the Game**
 
 - Run the executable in order to begin the game `stack exec minesweeper`
-- The default size of the board is 8x8 which can also be modified in the code. Moreover, the rows and column are numbered 0-7 **_not_** 1-8!
+- The default size of the board is 8x8 which can also be modified in the beginning of the game. Moreover, the rows and column are numbered starting from 0, **_not_** 1!
 
 2. **Commands**
 

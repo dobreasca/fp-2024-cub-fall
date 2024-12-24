@@ -5,11 +5,14 @@ import Minesweeper
 
 testInitGame :: Test
 testInitGame = TestCase $ do
-    game <- initGame 5 5 3
-    assertEqual "Game should have correct dimensions" (height game, width game) (5, 5)
-    assertBool "Game should have the correct number of mines" (Set.size (mines game) == 3)
-    assertBool "No cells should be revealed initially" (Set.null (revealed game))
-    assertBool "No cells should be flagged initially" (Set.null (flagged game))
+    case initGame 5 5 3 (0, 0) of
+      Left errMsg -> assertFailure $ "initGame failed: " ++ errMsg
+      Right action -> do
+        game <- action
+        assertEqual "Game should have correct dimensions" (height game, width game) (5, 5)
+        assertBool "Game should have the correct number of mines" (Set.size (mines game) == 3)
+        assertBool "No cells should be revealed initially" (Set.null (revealed game))
+        assertBool "No cells should be flagged initially" (Set.null (flagged game))
 
 testRevealSafeCell :: Test
 testRevealSafeCell = TestCase $ do
@@ -18,6 +21,13 @@ testRevealSafeCell = TestCase $ do
     assertBool "Safe cell should be revealed" (Set.member (0, 0) (revealed updatedGame))
     let n = nearbyMines updatedGame (0, 0)
     assertEqual "Nearby mines count should be correct" n 1
+
+testRevealAdjacentCells :: Test
+testRevealAdjacentCells = TestCase $ do
+    let game = Minesweeper 3 3 (Set.fromList [(2, 2)]) Set.empty Set.empty
+    let updatedGame = makeMove game (0, 0)
+    let expectedRevealed = Set.fromList [(0, 0), (0, 1), (1, 0), (1, 1), (0, 2), (1, 2), (2, 0), (2, 1)]
+    assertBool "All adjacent cells should be revealed" (Set.isSubsetOf expectedRevealed (revealed updatedGame))
 
 testHitMine :: Test
 testHitMine = TestCase $ do
@@ -28,6 +38,11 @@ testWinCondition :: Test
 testWinCondition = TestCase $ do
     let game = Minesweeper 2 2 (Set.fromList [(0, 0)]) (Set.fromList [(1, 0), (0, 1), (1, 1)]) Set.empty
     assertBool "Player should win when all safe cells are revealed" (won game)
+
+testLargeWinCondition :: Test
+testLargeWinCondition = TestCase $ do
+    let game = Minesweeper 5 5 (Set.fromList [(0, 0), (1, 1)]) (Set.fromList [(i, j) | i <- [0..4], j <- [0..4], (i, j) /= (0, 0), (i, j) /= (1, 1)]) Set.empty
+    assertBool "Player should win on a larger grid when all safe cells are revealed" (won game)
 
 testInvalidMoves :: Test
 testInvalidMoves = TestCase $ do
@@ -43,11 +58,37 @@ testFlagging = TestCase $ do
     let unflaggedGame = flaggedGame {flagged = Set.delete (0, 0) (flagged flaggedGame)}
     assertBool "Cell (0,0) should be unflagged" (not (Set.member (0, 0) (flagged unflaggedGame)))
 
+testFlagEdgeCases :: Test
+testFlagEdgeCases = TestCase $ do
+    let game = Minesweeper 3 3 Set.empty (Set.fromList [(0, 0)]) Set.empty
+    let flaggedGame = flagCell game (0, 0)
+    assertBool "Revealed cell cannot be flagged" (not (Set.member (0, 0) (flagged flaggedGame)))
+
+testGameLoss :: Test
+testGameLoss = TestCase $ do
+    let game = Minesweeper 3 3 (Set.fromList [(1, 1)]) Set.empty Set.empty
+    let updatedGame = makeMove game (1, 1)
+    assertBool "Game should end with a loss when a mine is revealed" (isMine game (1, 1) && Set.member (1, 1) (revealed updatedGame))
+
 propMinesWithinBounds :: Int -> Int -> Int -> Property
 propMinesWithinBounds h w m =
-    h > 0 && w > 0 && m > 0 ==> ioProperty $ do
-        game <- initGame h w m
-        return (all (\(x, y) -> x >= 0 && x < h && y >= 0 && y < w) (Set.toList (mines game)))
+    h > 0 && w > 0 && m > 0 && h * w > 1 && m <= max 1 (h * w - 1) ==> ioProperty $ do
+        case initGame h w m (0, 0) of
+            Left _ -> return False
+            Right action -> do
+                game <- action
+                let minesWithinBounds = all (\(x, y) -> x >= 0 && x < h && y >= 0 && y < w) (Set.toList (mines game))
+                return minesWithinBounds
+
+propDynamicGridSizes :: Int -> Int -> Property
+propDynamicGridSizes h w =
+    h > 0 && w > 0 && h * w > 1 ==> ioProperty $ do 
+        let m = max 1 ((h * w) `div` 6) 
+        case initGame h w m (0, 0) of
+            Left _ -> return False 
+            Right action -> do
+                game <- action
+                return (height game == h && width game == w)
 
 tests :: Test
 tests =
@@ -57,10 +98,15 @@ tests =
           TestLabel "Hit Mine" testHitMine,
           TestLabel "Win Condition" testWinCondition,
           TestLabel "Invalid Moves" testInvalidMoves,
-          TestLabel "Flagging and Unflagging" testFlagging
+          TestLabel "Flagging and Unflagging" testFlagging,
+          TestLabel "Reveal Adjacent Cells" testRevealAdjacentCells,
+          TestLabel "Game Loss" testGameLoss,
+          TestLabel "Flag Edge Cases" testFlagEdgeCases,
+          TestLabel "Large Win Condition" testLargeWinCondition
         ]
 
 main :: IO ()
 main = do
     _ <- runTestTT tests
     quickCheck propMinesWithinBounds
+    quickCheck propDynamicGridSizes
